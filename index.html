@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Christmas Bingo Cards</title>
+<style>
+  /*
+   * Layout sizes are NOT hardcoded here. They come from the CONFIGURATION
+   * block at the top of the script below, which copies them into the CSS
+   * custom properties (--page-width, --cell-size, ...) on <html> and writes
+   * the @page rule. Edit the values there, not here.
+   *
+   * The only values that live exclusively in CSS are cosmetic:
+   *   --font-family    typeface for titles and numbers
+   *   --border-width   thickness of the Bingo grid lines
+   *   --border-color   colour of the Bingo grid lines
+   */
+  :root {
+    --font-family: Arial, Helvetica, sans-serif;
+    --border-width: 1pt;
+    --border-color: #000;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #000;
+    font-family: var(--font-family);
+  }
+
+  /* One .sheet = one printed page. The page margin is applied as padding
+     (see the @page note in the script), so the sheet is exactly paper-sized. */
+  .sheet {
+    box-sizing: border-box;
+    width: var(--page-width);
+    height: var(--page-height);
+    padding: var(--page-margin);
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: repeat(var(--cards-per-row), var(--card-width));
+    grid-template-rows: repeat(var(--cards-per-column), var(--card-height));
+    gap: var(--card-gap);
+    /* Any leftover printable space is split evenly around the block of cards. */
+    justify-content: center;
+    align-content: center;
+    break-after: page;
+    page-break-after: always;
+  }
+  .sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .card {
+    box-sizing: border-box;
+    width: var(--card-width);
+    height: var(--card-height);
+    display: flex;
+    flex-direction: column;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .card h2 {
+    margin: 0;
+    height: var(--title-height);
+    line-height: var(--title-height);
+    font-size: var(--title-font-size);
+    font-weight: bold;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  /* Fixed table layout makes every column exactly one cell wide, so the
+     image headers and the number columns share identical column edges. */
+  .card table {
+    width: var(--grid-size);
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  /* Image header: no borders at all, so the images do not sit in a box.
+     The grid's top border starts at the first row of numbers. */
+  .card thead th {
+    border: none;
+    padding: 0 0 var(--header-image-gap) 0;
+    height: var(--header-image-size);
+    vertical-align: bottom;
+  }
+  .card thead img {
+    display: block;
+    margin: 0 auto;
+    width: var(--header-image-size);
+    height: var(--header-image-size);
+    object-fit: contain; /* scale to fit, preserving aspect ratio */
+  }
+
+  .card tbody td {
+    box-sizing: border-box;
+    width: var(--cell-size);
+    height: var(--cell-size);
+    padding: 0;
+    border: var(--border-width) solid var(--border-color);
+    text-align: center;
+    vertical-align: middle;
+    font-size: var(--number-font-size);
+    line-height: 1;
+  }
+  .card tbody td.free {
+    font-size: var(--free-font-size);
+    font-weight: bold;
+  }
+
+  /* Shown instead of the cards when the configuration cannot fit the page. */
+  .config-error {
+    max-width: 7in;
+    margin: 0.5in auto;
+    padding: 0.25in;
+    border: 2pt solid #000;
+    font-size: 12pt;
+    line-height: 1.4;
+  }
+  .config-error h1 { margin-top: 0; font-size: 16pt; }
+
+  /* On screen, outline each sheet so page boundaries are visible.
+     The outline is not printed. */
+  @media screen {
+    .sheet { margin: 0.25in auto; outline: 1px dashed #999; }
+  }
+
+  @media print {
+    .sheet { margin: 0; outline: none; }
+  }
+</style>
+</head>
+<body>
+<main id="cards" aria-label="Christmas Bingo cards"></main>
+
+<script>
+/* =========================================================================
+ * CONFIGURATION — edit these values, then reload the page.
+ * All sizes are in inches unless stated otherwise.
+ * ========================================================================= */
+
+/** Total number of Bingo cards to generate. Extra pages are added as needed. */
+const CARD_COUNT = 6;
+
+/** Number of cards across each printed page. */
+const CARDS_PER_ROW = 2;
+
+/** Number of cards down each printed page. */
+const CARDS_PER_COLUMN = 3;
+
+/** Width and height of each square Bingo cell. The grid is 5 cells wide. */
+const CELL_SIZE_INCHES = 0.5;
+
+/** Paper size (portrait). US Letter = 8.5 × 11 in. `name` is used by @page. */
+const PAGE_SIZE = { name: 'letter', widthInches: 8.5, heightInches: 11 };
+
+/**
+ * Blank border kept on every edge of the paper. Most printers cannot print
+ * closer than about 0.25 in to the edge; 0.3 in leaves a little headroom.
+ */
+const PAGE_MARGIN_INCHES = 0.3;
+
+/** Minimum space between neighbouring cards, for cutting them apart. */
+const CARD_GAP_INCHES = 0.3;
+
+/** Title text size (CSS units, e.g. '16pt'). Must fit in TITLE_HEIGHT_INCHES. */
+const TITLE_FONT_SIZE = '16pt';
+
+/** Height reserved for the "Christmas Bingo" title above each card. */
+const TITLE_HEIGHT_INCHES = 0.3;
+
+/** Bingo number text size (CSS units). */
+const NUMBER_FONT_SIZE = '16pt';
+
+/** Text size of the word FREE in the centre cell (CSS units). */
+const FREE_FONT_SIZE = '10pt';
+
+/** Width and height of the square box each column image is fitted into. */
+const HEADER_IMAGE_SIZE_INCHES = 0.4;
+
+/** Space between the bottom of the header images and the top of the grid. */
+const HEADER_IMAGE_GAP_INCHES = 0.05;
+
+/** Card title text. */
+const TITLE_TEXT = 'Christmas Bingo';
+
+/** Column images, left to right. Paths are relative to this HTML file. */
+const COLUMNS = [
+  { name: 'Elf',     image: 'images/elf.png' },
+  { name: 'Present', image: 'images/present.png' },
+  { name: 'Rudolph', image: 'images/rudolph.png' },
+  { name: 'Snowman', image: 'images/snowman.png' },
+  { name: 'Tree',    image: 'images/tree.png' },
+];
+
+/** Each column draws from 1..MAX_NUMBER. */
+const MAX_NUMBER = 6;
+
+/* ========================================================================= */
+
+const GRID_SIZE = 5;
+const CENTER = Math.floor(GRID_SIZE / 2); // row 3 / column 3 (zero-based 2)
+
+/* ---------- Randomization ---------- */
+
+/**
+ * Unbiased random integer in [0, max). Uses the browser's cryptographic
+ * generator with rejection sampling so no value is favoured by modulo bias;
+ * falls back to Math.random() if crypto is unavailable.
+ */
+function randomInt(max) {
+  if (window.crypto && window.crypto.getRandomValues) {
+    const limit = Math.floor(0x100000000 / max) * max;
+    const buf = new Uint32Array(1);
+    do { window.crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
+/** Fisher–Yates shuffle (in place): every permutation is equally likely. */
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+/** Numbers 1..MAX_NUMBER with `removeCount` distinct values removed at random, then shuffled. */
+function pickColumnNumbers(removeCount) {
+  const pool = Array.from({ length: MAX_NUMBER }, (_, i) => i + 1);
+  for (let r = 0; r < removeCount; r++) {
+    pool.splice(randomInt(pool.length), 1);
+  }
+  return shuffle(pool);
+}
+
+/**
+ * Build one card as columns[col][row]. Ordinary columns drop one number and
+ * use the remaining five. The centre column drops two numbers, uses the
+ * remaining four, and gets FREE (null) in the middle cell.
+ */
+function createCardColumns() {
+  const columns = [];
+  for (let col = 0; col < GRID_SIZE; col++) {
+    if (col === CENTER) {
+      const nums = pickColumnNumbers(MAX_NUMBER - (GRID_SIZE - 1));
+      nums.splice(CENTER, 0, null);
+      columns.push(nums);
+    } else {
+      columns.push(pickColumnNumbers(MAX_NUMBER - GRID_SIZE));
+    }
+  }
+  return columns;
+}
+
+/* ---------- Layout ---------- */
+
+function computeLayout() {
+  const gridSize = GRID_SIZE * CELL_SIZE_INCHES;
+  const cardWidth = gridSize;
+  const cardHeight = TITLE_HEIGHT_INCHES + HEADER_IMAGE_SIZE_INCHES +
+                     HEADER_IMAGE_GAP_INCHES + gridSize;
+  const usableWidth = PAGE_SIZE.widthInches - 2 * PAGE_MARGIN_INCHES;
+  const usableHeight = PAGE_SIZE.heightInches - 2 * PAGE_MARGIN_INCHES;
+  const neededWidth = CARDS_PER_ROW * cardWidth + (CARDS_PER_ROW - 1) * CARD_GAP_INCHES;
+  const neededHeight = CARDS_PER_COLUMN * cardHeight + (CARDS_PER_COLUMN - 1) * CARD_GAP_INCHES;
+  return { gridSize, cardWidth, cardHeight, usableWidth, usableHeight, neededWidth, neededHeight };
+}
+
+/** Returns a list of human-readable problems; empty means the layout fits. */
+function validateConfig(layout) {
+  const problems = [];
+  const fmt = n => n.toFixed(2) + ' in';
+  const positiveInts = { CARD_COUNT, CARDS_PER_ROW, CARDS_PER_COLUMN };
+  for (const [name, value] of Object.entries(positiveInts)) {
+    if (!Number.isInteger(value) || value < 1) problems.push(`${name} must be a whole number of at least 1 (currently ${value}).`);
+  }
+  if (COLUMNS.length !== GRID_SIZE) problems.push(`COLUMNS must list exactly ${GRID_SIZE} images (currently ${COLUMNS.length}).`);
+  if (MAX_NUMBER < GRID_SIZE) problems.push(`MAX_NUMBER must be at least ${GRID_SIZE} (currently ${MAX_NUMBER}).`);
+  if (layout.neededWidth > layout.usableWidth + 1e-9) {
+    problems.push(`Cards are too wide: ${CARDS_PER_ROW} cards of ${fmt(layout.cardWidth)} plus gaps need ` +
+      `${fmt(layout.neededWidth)}, but only ${fmt(layout.usableWidth)} fits between the page margins. ` +
+      `Reduce CARDS_PER_ROW, CELL_SIZE_INCHES, CARD_GAP_INCHES or PAGE_MARGIN_INCHES.`);
+  }
+  if (layout.neededHeight > layout.usableHeight + 1e-9) {
+    problems.push(`Cards are too tall: ${CARDS_PER_COLUMN} cards of ${fmt(layout.cardHeight)} plus gaps need ` +
+      `${fmt(layout.neededHeight)}, but only ${fmt(layout.usableHeight)} fits between the page margins. ` +
+      `Reduce CARDS_PER_COLUMN, CELL_SIZE_INCHES, TITLE_HEIGHT_INCHES, HEADER_IMAGE_SIZE_INCHES, ` +
+      `HEADER_IMAGE_GAP_INCHES, CARD_GAP_INCHES or PAGE_MARGIN_INCHES.`);
+  }
+  return problems;
+}
+
+/** Copy configuration into CSS custom properties and the @page rule. */
+function applyLayoutStyles(layout) {
+  const vars = {
+    '--page-width': PAGE_SIZE.widthInches + 'in',
+    '--page-height': PAGE_SIZE.heightInches + 'in',
+    '--page-margin': PAGE_MARGIN_INCHES + 'in',
+    '--cards-per-row': CARDS_PER_ROW,
+    '--cards-per-column': CARDS_PER_COLUMN,
+    '--card-gap': CARD_GAP_INCHES + 'in',
+    '--card-width': layout.cardWidth + 'in',
+    '--card-height': layout.cardHeight + 'in',
+    '--grid-size': layout.gridSize + 'in',
+    '--cell-size': CELL_SIZE_INCHES + 'in',
+    '--title-height': TITLE_HEIGHT_INCHES + 'in',
+    '--title-font-size': TITLE_FONT_SIZE,
+    '--number-font-size': NUMBER_FONT_SIZE,
+    '--free-font-size': FREE_FONT_SIZE,
+    '--header-image-size': HEADER_IMAGE_SIZE_INCHES + 'in',
+    '--header-image-gap': HEADER_IMAGE_GAP_INCHES + 'in',
+  };
+  for (const [name, value] of Object.entries(vars)) {
+    document.documentElement.style.setProperty(name, String(value));
+  }
+
+  // @page cannot use CSS variables, so it is generated here. The browser's
+  // page margin is set to 0 — which leaves no room for the browser's own
+  // date/URL headers and footers — and PAGE_MARGIN_INCHES is applied as
+  // padding on each .sheet instead.
+  let pageStyle = document.getElementById('page-style');
+  if (!pageStyle) {
+    pageStyle = document.createElement('style');
+    pageStyle.id = 'page-style';
+    document.head.appendChild(pageStyle);
+  }
+  pageStyle.textContent = `@page { size: ${PAGE_SIZE.name} portrait; margin: 0; }`;
+}
+
+/* ---------- Rendering ---------- */
+
+function buildCard(cardNumber) {
+  const columns = createCardColumns();
+
+  const card = document.createElement('article');
+  card.className = 'card';
+  card.setAttribute('aria-label', `${TITLE_TEXT} card ${cardNumber}`);
+
+  const title = document.createElement('h2');
+  title.textContent = TITLE_TEXT;
+  card.appendChild(title);
+
+  const table = document.createElement('table');
+
+  const headRow = table.createTHead().insertRow();
+  for (const column of COLUMNS) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    const img = document.createElement('img');
+    img.src = column.image;
+    img.alt = column.name;
+    img.loading = 'eager'; // load now, so images are ready before printing
+    th.appendChild(img);
+    headRow.appendChild(th);
+  }
+
+  const body = table.createTBody();
+  for (let row = 0; row < GRID_SIZE; row++) {
+    const tr = body.insertRow();
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const td = tr.insertCell();
+      const value = columns[col][row];
+      if (value === null) {
+        td.className = 'free';
+        td.textContent = 'FREE';
+      } else {
+        td.textContent = value;
+      }
+    }
+  }
+
+  card.appendChild(table);
+  return card;
+}
+
+/**
+ * Generate a fresh set of cards. Called on load; it can also be run again
+ * without reloading by pressing "R" or calling generateCards() in the console.
+ */
+function generateCards() {
+  const container = document.getElementById('cards');
+  const layout = computeLayout();
+  const problems = validateConfig(layout);
+
+  container.replaceChildren();
+
+  if (problems.length) {
+    const box = document.createElement('section');
+    box.className = 'config-error';
+    box.setAttribute('role', 'alert');
+    const heading = document.createElement('h1');
+    heading.textContent = 'Bingo cards do not fit — adjust the configuration';
+    const list = document.createElement('ul');
+    for (const p of problems) {
+      const li = document.createElement('li');
+      li.textContent = p;
+      list.appendChild(li);
+      console.error('Bingo configuration:', p);
+    }
+    box.append(heading, list);
+    container.appendChild(box);
+    return;
+  }
+
+  applyLayoutStyles(layout);
+
+  const cardsPerSheet = CARDS_PER_ROW * CARDS_PER_COLUMN;
+  let sheet = null;
+  for (let i = 0; i < CARD_COUNT; i++) {
+    if (i % cardsPerSheet === 0) {
+      sheet = document.createElement('section');
+      sheet.className = 'sheet';
+      sheet.setAttribute('aria-label', `Page ${i / cardsPerSheet + 1}`);
+      container.appendChild(sheet);
+    }
+    sheet.appendChild(buildCard(i + 1));
+  }
+}
+
+document.addEventListener('keydown', event => {
+  if ((event.key === 'r' || event.key === 'R') && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    generateCards();
+  }
+});
+
+generateCards();
+</script>
+</body>
+</html>
